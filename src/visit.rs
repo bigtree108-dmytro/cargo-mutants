@@ -2366,4 +2366,136 @@ mod test {
             "should still contain add fn-value mutant: {names:?}"
         );
     }
+
+    const STRUCT_LITERAL_WITH_BASE: &str = indoc! {"
+        fn settings() -> Settings {
+            Settings {
+                enabled: true,
+                count: 1 + 2,
+                ..Default::default()
+            }
+        }
+    "};
+
+    fn struct_literal_mutant_names(options: &Options) -> Vec<String> {
+        mutate_source_str(STRUCT_LITERAL_WITH_BASE, options)
+            .unwrap()
+            .iter()
+            .map(|mutant| mutant.name(false))
+            .collect()
+    }
+
+    #[test]
+    fn struct_literal_mutants_without_name_filters() {
+        assert_eq!(
+            struct_literal_mutant_names(&Options::default()),
+            [
+                "src/main.rs: replace settings -> Settings with Default::default()",
+                "src/main.rs: delete field enabled from struct Settings expression in settings",
+                "src/main.rs: delete field count from struct Settings expression in settings",
+                "src/main.rs: replace + with - in settings",
+                "src/main.rs: replace + with * in settings",
+            ]
+        );
+    }
+
+    #[test]
+    fn re_selects_one_struct_field_mutant() {
+        let options = Options::from_arg_strs(["mutants", "--re", "delete field enabled"]);
+        assert_eq!(
+            struct_literal_mutant_names(&options),
+            ["src/main.rs: delete field enabled from struct Settings expression in settings"]
+        );
+    }
+
+    #[test]
+    fn re_matching_other_mutants_excludes_struct_field_mutants() {
+        let options = Options::from_arg_strs(["mutants", "--re", r"replace \+"]);
+        assert_eq!(
+            struct_literal_mutant_names(&options),
+            [
+                "src/main.rs: replace + with - in settings",
+                "src/main.rs: replace + with * in settings",
+            ]
+        );
+    }
+
+    #[test]
+    fn exclude_re_excludes_struct_field_mutants_and_keeps_others() {
+        let options = Options::from_arg_strs(["mutants", "--exclude-re", "delete field"]);
+        assert_eq!(
+            struct_literal_mutant_names(&options),
+            [
+                "src/main.rs: replace settings -> Settings with Default::default()",
+                "src/main.rs: replace + with - in settings",
+                "src/main.rs: replace + with * in settings",
+            ]
+        );
+    }
+
+    #[test]
+    fn exclude_re_in_config_excludes_one_struct_field_mutant() {
+        let options = Options::from_arg_strs_and_config(
+            ["mutants"],
+            r#"exclude_re = ["delete field count"]"#,
+        );
+        assert_eq!(
+            struct_literal_mutant_names(&options),
+            [
+                "src/main.rs: replace settings -> Settings with Default::default()",
+                "src/main.rs: delete field enabled from struct Settings expression in settings",
+                "src/main.rs: replace + with - in settings",
+                "src/main.rs: replace + with * in settings",
+            ]
+        );
+    }
+
+    #[test]
+    fn examine_re_in_config_selects_one_struct_field_mutant() {
+        let options = Options::from_arg_strs_and_config(
+            ["mutants"],
+            r#"examine_re = ["delete field count"]"#,
+        );
+        assert_eq!(
+            struct_literal_mutant_names(&options),
+            ["src/main.rs: delete field count from struct Settings expression in settings"]
+        );
+    }
+
+    #[test]
+    fn exclude_re_matching_nothing_keeps_all_struct_literal_mutants() {
+        let options = Options::from_arg_strs(["mutants", "--exclude-re", "matches no mutant"]);
+        assert_eq!(
+            struct_literal_mutant_names(&options),
+            struct_literal_mutant_names(&Options::default())
+        );
+    }
+
+    #[test]
+    fn exclude_re_attr_excludes_one_struct_field_mutant() {
+        let mutants = mutate_source_str(
+            indoc! {r#"
+                #[mutants::exclude_re("delete field count")]
+                fn settings() -> Settings {
+                    Settings {
+                        enabled: true,
+                        count: 1 + 2,
+                        ..Default::default()
+                    }
+                }
+            "#},
+            &Options::default(),
+        )
+        .unwrap();
+        let names: Vec<String> = mutants.iter().map(|m| m.name(false)).collect();
+        assert_eq!(
+            names,
+            [
+                "src/main.rs: replace settings -> Settings with Default::default()",
+                "src/main.rs: delete field enabled from struct Settings expression in settings",
+                "src/main.rs: replace + with - in settings",
+                "src/main.rs: replace + with * in settings",
+            ]
+        );
+    }
 }
